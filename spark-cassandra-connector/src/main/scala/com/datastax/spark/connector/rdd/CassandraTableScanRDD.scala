@@ -12,9 +12,9 @@ import com.datastax.spark.connector.util.CqlWhereParser.{EqPredicate, InListPred
 import com.datastax.spark.connector.util.Quote._
 import com.datastax.spark.connector.util.{CountingIterator, CqlWhereParser}
 import com.datastax.spark.connector.writer.RowWriterFactory
-
 import com.datastax.driver.core._
 import org.apache.spark.metrics.InputMetricsUpdater
+import org.apache.spark.rdd.RDD
 import org.apache.spark.{Partition, Partitioner, SparkContext, TaskContext}
 
 import scala.collection.JavaConversions._
@@ -66,6 +66,7 @@ class CassandraTableScanRDD[R] private[connector](
     val columnNames: ColumnSelector = AllColumns,
     val where: CqlWhereClause = CqlWhereClause.empty,
     val limit: Option[Long] = None,
+    val numPartitions: Option[Int] = None,
     val clusteringOrder: Option[ClusteringOrder] = None,
     val readConf: ReadConf = ReadConf(),
     overridePartitioner: Option[Partitioner] = None)(
@@ -76,6 +77,21 @@ class CassandraTableScanRDD[R] private[connector](
   with CassandraTableRowReaderProvider[R] {
 
   override type Self = CassandraTableScanRDD[R]
+
+  private def copy(numPartitions: Option[Int]): Self = {
+    new CassandraTableScanRDD[R](
+      sc = sc,
+      connector = connector,
+      keyspaceName = keyspaceName,
+      tableName = tableName,
+      columnNames = columnNames,
+      where = where,
+      limit = limit,
+      numPartitions = numPartitions,
+      clusteringOrder = None,
+      readConf = readConf,
+      overridePartitioner = overridePartitioner)
+  }
 
   override protected def copy(
     columnNames: ColumnSelector = columnNames,
@@ -100,6 +116,7 @@ class CassandraTableScanRDD[R] private[connector](
       columnNames = columnNames,
       where = where,
       limit = limit,
+      numPartitions = numPartitions,
       clusteringOrder = clusteringOrder,
       readConf = readConf,
       overridePartitioner = overridePartitioner)
@@ -221,9 +238,35 @@ class CassandraTableScanRDD[R] private[connector](
     if (containsPartitionKey(where)) {
       CassandraPartitionGenerator(connector, tableDef, Some(1), splitSize)
     } else {
-      CassandraPartitionGenerator(connector, tableDef, splitCount, splitSize)
+      CassandraPartitionGenerator(connector, tableDef, numPartitions.orElse(splitCount), splitSize)
     }
   }
+
+  /**
+    * The method does not create CoalesceRDD but reduce number of parittions to read from Cassandra.
+    * It turn off partition size calcutlation and ignore spark.cassandra.input.split.size
+    * The method is useful with where() method call, when actual size of data is smaller then the table size.
+    * It has no effect if a partition key is used in where clause.
+    *
+    * @param numPartitions number of partinions
+    * @param shuffle       weither to call shufle after
+    * @param ord
+    * @return new CassandraTableScanRDD with predefined nube of paritions
+    */
+
+  override def coalesce(numPartitions: Int, shuffle: Boolean = false)(implicit ord: Ordering[R] = null)
+  : RDD[R] = {
+    val rdd = copy(numPartitions = Some(numPartitions))
+    if (shuffle) {
+      rdd.superCoalesce(numPartitions, shuffle)
+    } else {
+      rdd
+    }
+  }
+
+  private def superCoalesce(numPartitions: Int, shuffle: Boolean = false)(implicit ord: Ordering[R] = null) =
+    super.coalesce(numPartitions, shuffle);
+
 
   @transient override val partitioner = overridePartitioner
 
@@ -369,6 +412,7 @@ class CassandraTableScanRDD[R] private[connector](
         columnNames = SomeColumns(RowCountRef),
         where = where,
         limit = limit,
+        numPartitions = numPartitions,
         clusteringOrder = clusteringOrder,
         readConf = readConf)
 
