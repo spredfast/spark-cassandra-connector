@@ -66,7 +66,6 @@ class CassandraTableScanRDD[R] private[connector](
     val columnNames: ColumnSelector = AllColumns,
     val where: CqlWhereClause = CqlWhereClause.empty,
     val limit: Option[Long] = None,
-    val numPartitions: Option[Int] = None,
     val clusteringOrder: Option[ClusteringOrder] = None,
     val readConf: ReadConf = ReadConf(),
     overridePartitioner: Option[Partitioner] = None)(
@@ -77,21 +76,6 @@ class CassandraTableScanRDD[R] private[connector](
   with CassandraTableRowReaderProvider[R] {
 
   override type Self = CassandraTableScanRDD[R]
-
-  private def copy(numPartitions: Option[Int]): Self = {
-    new CassandraTableScanRDD[R](
-      sc = sc,
-      connector = connector,
-      keyspaceName = keyspaceName,
-      tableName = tableName,
-      columnNames = columnNames,
-      where = where,
-      limit = limit,
-      numPartitions = numPartitions,
-      clusteringOrder = None,
-      readConf = readConf,
-      overridePartitioner = overridePartitioner)
-  }
 
   override protected def copy(
     columnNames: ColumnSelector = columnNames,
@@ -116,7 +100,6 @@ class CassandraTableScanRDD[R] private[connector](
       columnNames = columnNames,
       where = where,
       limit = limit,
-      numPartitions = numPartitions,
       clusteringOrder = clusteringOrder,
       readConf = readConf,
       overridePartitioner = overridePartitioner)
@@ -238,25 +221,26 @@ class CassandraTableScanRDD[R] private[connector](
     if (containsPartitionKey(where)) {
       CassandraPartitionGenerator(connector, tableDef, Some(1), splitSize)
     } else {
-      CassandraPartitionGenerator(connector, tableDef, numPartitions.orElse(splitCount), splitSize)
+      CassandraPartitionGenerator(connector, tableDef, splitCount, splitSize)
     }
   }
 
   /**
-    * The method does not create CoalesceRDD but reduce number of parittions to read from Cassandra.
-    * It turn off partition size calcutlation and ignore spark.cassandra.input.split.size
+    * This method overrides the default spark behavior and will not create a CoalesceRDD. Instead it will reduce
+    * the number of partitions by adjusting the partitioning of C* data on read. Using this method will override
+    * spark.cassandra.input.split.size.
     * The method is useful with where() method call, when actual size of data is smaller then the table size.
     * It has no effect if a partition key is used in where clause.
     *
-    * @param numPartitions number of partinions
-    * @param shuffle       weither to call shufle after
+    * @param numPartitions number of partitions
+    * @param shuffle       whether to call shuffle after
     * @param ord
-    * @return new CassandraTableScanRDD with predefined nube of paritions
+    * @return new CassandraTableScanRDD with predefined number of partitions
     */
 
   override def coalesce(numPartitions: Int, shuffle: Boolean = false)(implicit ord: Ordering[R] = null)
   : RDD[R] = {
-    val rdd = copy(numPartitions = Some(numPartitions))
+    val rdd = copy(readConf = readConf.copy(splitCount = Some(numPartitions)))
     if (shuffle) {
       rdd.superCoalesce(numPartitions, shuffle)
     } else {
@@ -412,7 +396,6 @@ class CassandraTableScanRDD[R] private[connector](
         columnNames = SomeColumns(RowCountRef),
         where = where,
         limit = limit,
-        numPartitions = numPartitions,
         clusteringOrder = clusteringOrder,
         readConf = readConf)
 

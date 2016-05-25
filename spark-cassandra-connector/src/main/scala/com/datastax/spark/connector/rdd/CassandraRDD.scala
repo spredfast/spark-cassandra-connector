@@ -242,7 +242,6 @@ object CassandraRDD {
       CqlWhereClause.empty,
       None,
       None,
-      None,
       ReadConf.fromSparkConf(sc.getConf)
     )
 
@@ -256,7 +255,6 @@ object CassandraRDD {
       tableName,
       AllColumns,
       CqlWhereClause.empty,
-      None,
       None,
       None,
       ReadConf.fromSparkConf(sc.getConf)
