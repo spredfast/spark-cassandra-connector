@@ -3,17 +3,8 @@ package org.apache.spark.sql.cassandra
 import java.net.InetAddress
 import java.util.UUID
 
-import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.cassandra.CassandraSQLRow.CassandraSQLRowReader
-import org.apache.spark.sql.cassandra.DataTypeConverter._
-import org.apache.spark.sql.sources._
-import org.apache.spark.sql.types._
-import org.apache.spark.sql.{DataFrame, Row, SQLContext, sources}
-import org.apache.spark.unsafe.types.UTF8String
-import org.apache.spark.SparkConf
-
 import com.datastax.spark.connector.cql.{CassandraConnector, CassandraConnectorConf, Schema}
-import com.datastax.spark.connector.rdd.partitioner.CassandraPartitionGenerator._
+import com.datastax.spark.connector.mapper.ColumnMapperConvention
 import com.datastax.spark.connector.rdd.partitioner.DataSizeEstimates
 import com.datastax.spark.connector.rdd.partitioner.dht.TokenFactory.forSystemLocalPartitioner
 import com.datastax.spark.connector.rdd.{CassandraRDD, ReadConf}
@@ -22,6 +13,14 @@ import com.datastax.spark.connector.util.Quote._
 import com.datastax.spark.connector.util.{ConfigParameter, Logging, ReflectionUtil}
 import com.datastax.spark.connector.writer.{SqlRowWriter, WriteConf}
 import com.datastax.spark.connector.{SomeColumns, _}
+import org.apache.spark.SparkConf
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.cassandra.CassandraSQLRow.CassandraSQLRowReader
+import org.apache.spark.sql.cassandra.DataTypeConverter._
+import org.apache.spark.sql.sources._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.{DataFrame, Row, SQLContext, sources}
+import org.apache.spark.unsafe.types.UTF8String
 
 /**
  * Implements [[BaseRelation]]]], [[InsertableRelation]]]] and [[PrunedFilteredScan]]]]
@@ -60,9 +59,13 @@ private[cassandra] class CassandraSourceRelation(
         session => session.execute(s"TRUNCATE $keyspace.$table")
       }
     }
-
     implicit val rwf = SqlRowWriter.Factory
-    val columns = SomeColumns(data.columns.map(x => x: ColumnRef): _*)
+
+    val columnsByName = (for (c <- tableDef.columns) yield (c.columnName, c.ref)).toMap
+    val mappedColumns = data.columns.map(x =>
+      ColumnMapperConvention.columnForProperty(x, columnsByName).getOrElse(x: ColumnRef))
+
+    val columns = SomeColumns(mappedColumns: _*)
     data.rdd.saveToCassandra(tableRef.keyspace, tableRef.table, columns, writeConf)
   }
 
