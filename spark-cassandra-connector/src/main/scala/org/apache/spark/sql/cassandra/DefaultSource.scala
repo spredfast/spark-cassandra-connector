@@ -52,7 +52,8 @@ class DefaultSource extends RelationProvider with SchemaRelationProvider with Cr
     parameters: Map[String, String]): BaseRelation = {
 
     val (tableRef, options) = TableRefAndOptions(parameters)
-    CassandraSourceRelation(tableRef, sqlContext, options)
+    val relation = CassandraSourceRelation(tableRef, sqlContext, options)
+    if (options.camelcase) new AliasedCassandraSourceRelation(relation, sqlContext) else relation
   }
 
   /**
@@ -65,6 +66,9 @@ class DefaultSource extends RelationProvider with SchemaRelationProvider with Cr
     schema: StructType): BaseRelation = {
 
     val (tableRef, options) = TableRefAndOptions(parameters)
+    if (options.camelcase) {
+      logWarning(s"Ignoring $CassandraDataSourceCamelcaseProperty setting since custom schema is provided")
+    }
     CassandraSourceRelation(tableRef, sqlContext, options, Option(schema))
   }
 
@@ -79,7 +83,8 @@ class DefaultSource extends RelationProvider with SchemaRelationProvider with Cr
     data: DataFrame): BaseRelation = {
 
     val (tableRef, options) = TableRefAndOptions(parameters)
-    val table = CassandraSourceRelation(tableRef, sqlContext, options)
+    val relation = CassandraSourceRelation(tableRef, sqlContext, options)
+    val table = if (options.camelcase) new AliasedCassandraSourceRelation(relation, sqlContext) else relation
 
     mode match {
       case Append => table.insert(data, overwrite = false)
@@ -100,12 +105,15 @@ class DefaultSource extends RelationProvider with SchemaRelationProvider with Cr
         }
     }
 
-    CassandraSourceRelation(tableRef, sqlContext, options)
+    table
   }
 }
 
 /** Store data source options */
-case class CassandraSourceOptions(pushdown: Boolean = true, cassandraConfs: Map[String, String] = Map.empty)
+case class CassandraSourceOptions(
+  pushdown: Boolean = true,
+  camelcase: Boolean = false,
+  cassandraConfs: Map[String, String] = Map.empty)
 
 object DefaultSource {
   val CassandraDataSourceTableNameProperty = "table"
@@ -113,6 +121,7 @@ object DefaultSource {
   val CassandraDataSourceClusterNameProperty = "cluster"
   val CassandraDataSourceUserDefinedSchemaNameProperty = "schema"
   val CassandraDataSourcePushdownEnableProperty = "pushdown"
+  val CassandraDataSourceCamelcaseProperty = "camelcase"
   val CassandraDataSourceProviderPackageName = DefaultSource.getClass.getPackage.getName
   val CassandraDataSourceProviderClassName = CassandraDataSourceProviderPackageName + ".DefaultSource"
 
@@ -123,9 +132,10 @@ object DefaultSource {
     val keyspaceName = parameters(CassandraDataSourceKeyspaceNameProperty)
     val clusterName = parameters.get(CassandraDataSourceClusterNameProperty)
     val pushdown : Boolean = parameters.getOrElse(CassandraDataSourcePushdownEnableProperty, "true").toBoolean
+    val camelcase : Boolean = parameters.getOrElse(CassandraDataSourceCamelcaseProperty, "false").toBoolean
     val cassandraConfs = buildConfMap(parameters)
 
-    (TableRef(tableName, keyspaceName, clusterName), CassandraSourceOptions(pushdown, cassandraConfs))
+    (TableRef(tableName, keyspaceName, clusterName), CassandraSourceOptions(pushdown, camelcase, cassandraConfs))
   }
 
   val confProperties = ReadConf.Properties.map(_.name) ++

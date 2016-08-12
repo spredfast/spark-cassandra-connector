@@ -5,7 +5,9 @@ import com.datastax.spark.connector.cql.CassandraConnector
 import com.datastax.spark.connector.rdd.{CassandraTableScanRDD, CqlWhereClause}
 import com.datastax.spark.connector.util.Logging
 import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.cassandra.DefaultSource
 import org.apache.spark.sql.execution.{FilterExec, RDDScanExec, RowDataSourceScanExec, SparkPlan, WholeStageCodegenExec}
+
 import scala.concurrent.Future
 
 class CassandraPrunedFilteredScanSpec extends SparkCassandraITFlatSpecBase with Logging  {
@@ -24,7 +26,7 @@ class CassandraPrunedFilteredScanSpec extends SparkCassandraITFlatSpecBase with 
         Future {
           session.execute(
             s"""CREATE TABLE IF NOT EXISTS $ks.colors
-                |(name TEXT, color TEXT, priority INT, PRIMARY KEY (name, priority)) """
+                |(name TEXT, color TEXT, priority_case INT, PRIMARY KEY (name, priority_case)) """
                 .stripMargin)
         },
         Future {
@@ -41,18 +43,28 @@ class CassandraPrunedFilteredScanSpec extends SparkCassandraITFlatSpecBase with 
   val fieldsOptions = Map("keyspace" -> ks, "table" -> "fields")
   val withPushdown = Map("pushdown" -> "true")
   val withoutPushdown = Map("pushdown" -> "false")
+  val withCamelcase = Map(DefaultSource.CassandraDataSourceCamelcaseProperty -> "true")
 
   "CassandraPrunedFilteredScan" should "pushdown predicates for clustering keys" in {
     val colorDF = sqlContext.read.format(cassandraFormat).options(colorOptions ++ withPushdown).load()
-    val executionPlan = colorDF.filter("priority > 5").queryExecution.executedPlan
+    val executionPlan = colorDF.filter("priority_case > 5").queryExecution.executedPlan
     val cts = findCassandraTableScanRDD(executionPlan)
     cts.isDefined shouldBe true
-    cts.get.where shouldBe CqlWhereClause(Seq(""""priority" > ?"""), List(5))
+    cts.get.where shouldBe CqlWhereClause(Seq(""""priority_case" > ?"""), List(5))
+  }
+
+  it should "pushdown predicates for clustering keys when camelcase read is enabled" in {
+    val colorDF = sqlContext.read.format(cassandraFormat)
+      .options(colorOptions ++ withPushdown ++ withCamelcase).load()
+    val executionPlan = colorDF.filter("priorityCase > 5").queryExecution.executedPlan
+    val cts = findCassandraTableScanRDD(executionPlan)
+    cts.isDefined shouldBe true
+    cts.get.where shouldBe CqlWhereClause(Seq(""""priority_case" > ?"""), List(5))
   }
 
   it should "not pushdown predicates for clustering keys if filterPushdown is disabled" in {
     val colorDF = sqlContext.read.format(cassandraFormat).options(colorOptions ++ withoutPushdown).load()
-    val executionPlan = colorDF.filter("priority > 5").queryExecution.executedPlan
+    val executionPlan = colorDF.filter("priority_case > 5").queryExecution.executedPlan
     val cts = findCassandraTableScanRDD(executionPlan)
     cts.isDefined shouldBe true
     cts.get.where shouldBe CqlWhereClause(Seq(), List())

@@ -1,16 +1,15 @@
 package com.datastax.spark.connector.sql
 
 import scala.concurrent.Future
-
 import org.apache.spark.sql.SaveMode._
 import org.apache.spark.sql.cassandra.{AnalyzedPredicates, CassandraPredicateRules, CassandraSourceRelation, TableRef}
 import org.apache.spark.sql.sources.{EqualTo, Filter}
 import org.apache.spark.sql.{DataFrame, SQLContext}
 import org.scalatest.BeforeAndAfterEach
-
 import com.datastax.spark.connector.SparkCassandraITFlatSpecBase
 import com.datastax.spark.connector.cql.{CassandraConnector, TableDef}
 import com.datastax.spark.connector.util.Logging
+import org.apache.spark.sql.types.{IntegerType, StructField}
 
 class CassandraDataSourceSpec extends SparkCassandraITFlatSpecBase with Logging with BeforeAndAfterEach {
   useCassandraConfig(Seq("cassandra-default.yaml.template"))
@@ -79,7 +78,28 @@ class CassandraDataSourceSpec extends SparkCassandraITFlatSpecBase with Logging 
              |  key int,
              |  PRIMARY KEY (key)
              |)""".stripMargin.replaceAll("\n", " "))
+      },
+
+      Future {
+        session.execute(
+          s"""
+             |CREATE TABLE $ks.df_camelcase_test(
+             |  a int,
+             |  b_Ccc int,
+             |  ddd int,
+             |  e_f int,
+             |  g_h_ int,
+             |  I_J int,
+             |  key int,
+             |  PRIMARY KEY (key, b_ccc)
+             |)""".stripMargin.replaceAll("\n", " "))
+
+        session.execute(s"INSERT INTO $ks.df_camelcase_test (a, b_Ccc, ddd, e_f, g_h_, I_J, key) " +
+          "VALUES (0,1,2,3,4,5,6)")
+        session.execute(s"INSERT INTO $ks.df_camelcase_test (a, b_Ccc, ddd, e_f, g_h_, I_J, key) " +
+          "VALUES (10,11,12,13,14,15,16)")
       }
+
     )
   }
 
@@ -245,6 +265,46 @@ class CassandraDataSourceSpec extends SparkCassandraITFlatSpecBase with Logging 
 
     val qp = df.queryExecution.executedPlan
     println(qp.constraints)
+  }
+
+  it should "adjust underscore column names to camelcase when explicitly told to" in {
+    val df = sqlContext
+      .read
+      .format("org.apache.spark.sql.cassandra")
+      .options(Map("keyspace" -> ks, "table" -> "df_camelcase_test", "camelcase" -> "true"))
+      .load()
+
+    df.select("a").where("a < 10").first().getInt(0) should be(0)
+    df.select("bCcc").where("bCcc = 1").first().getInt(0) should be(1)
+    df.select("ddd").where("ddd > 10").first().getInt(0) should be(12)
+    df.select("eF").where("eF <= 10").first().getInt(0) should be(3)
+    df.select("gH").where("gH != 14").first().getInt(0) should be(4)
+    df.select("iJ").where("iJ >= 10").first().getInt(0) should be(15)
+    df.select("gH", "iJ").where("iJ >= 10 and gH >= 10").first().getInt(0) should be(14)
+  }
+
+  it should "be able load columns that are not underscored when camelcase setting is enabled" in {
+    val df = sqlContext
+      .read
+      .format("org.apache.spark.sql.cassandra")
+      .options(Map("table" -> "test1", "keyspace" -> ks, "camelcase" -> "true"))
+      .load()
+    df.select("b").where("b < 2").count() should be(4)
+  }
+
+  it should "discard camelcase setting when user scheme is provided" in {
+    val schema = org.apache.spark.sql.types.StructType(Seq(
+      StructField("a", IntegerType),
+      StructField("b_ccc", IntegerType)
+    ))
+    val df = sqlContext
+      .read
+      .format("org.apache.spark.sql.cassandra")
+      .options(Map("keyspace" -> ks, "table" -> "df_camelcase_test", "camelcase" -> "true"))
+      .schema(schema)
+      .load()
+
+    df.select("b_ccc").where("b_ccc < 5").first().getInt(0) should be(1)
   }
 
   case class CamelCaseClass(key: Int, underscoreField: Int)

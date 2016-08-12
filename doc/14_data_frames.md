@@ -22,6 +22,7 @@ Those followed with a default of N/A are required, all others are optional.
 | keyspace    | The keyspace where table is looked for                | String        | N/A      |
 | cluster     | The group of the Cluster Level Settings to inherit    | String        | "default"|
 | pushdown    | Enables pushing down predicates to C* when applicable | (true,false)  | true     |
+| camelcase   | Enables column names conversion to camelcase on read  | (true,false)  | false    |
 
 ####Read, Writing and CassandraConnector Options
 Any normal Spark Connector configuration options for Connecting, Reading or Writing
@@ -122,6 +123,9 @@ val df2 = sqlContext
   .cassandraFormat("words", "test", "cluster_A")
   .load()
 ```
+
+If `camelcase` parameter is set to `true` than underscored column names like `user_id` are converted to
+camelcase notation - namely, created DataFrame has `userId` field. 
 
 ###Creating DataFrames using Spark SQL
 
