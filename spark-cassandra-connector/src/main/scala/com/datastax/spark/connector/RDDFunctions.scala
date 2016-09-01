@@ -132,6 +132,7 @@ class RDDFunctions[T](rdd: RDD[T]) extends WritableToCassandra[T] with Serializa
     joinColumns: ColumnSelector = PartitionKeyColumns)(
   implicit 
     connector: CassandraConnector = CassandraConnector(sparkContext.getConf),
+    readConf: ReadConf = ReadConf.fromSparkConf(rdd.sparkContext.getConf),
     newType: ClassTag[R], rrf: RowReaderFactory[R], 
     ev: ValidRDDType[R],
     currentType: ClassTag[T], 
@@ -144,7 +145,7 @@ class RDDFunctions[T](rdd: RDD[T]) extends WritableToCassandra[T] with Serializa
       connector,
       columnNames = selectedColumns,
       joinColumns = joinColumns,
-      readConf = ReadConf.fromSparkConf(rdd.sparkContext.getConf)
+      readConf = readConf
     )
   }
 
