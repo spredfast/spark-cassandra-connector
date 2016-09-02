@@ -7,7 +7,7 @@ import com.datastax.spark.connector.cql._
 import com.datastax.spark.connector.mapper.ColumnMapper
 import com.datastax.spark.connector.rdd.partitioner.{CassandraPartitionedRDD, ReplicaPartitioner}
 import com.datastax.spark.connector.rdd.reader._
-import com.datastax.spark.connector.rdd.{ReadConf, CassandraJoinRDD, CassandraLeftJoinRDD, SpannedRDD, ValidRDDType}
+import com.datastax.spark.connector.rdd.{ReadConf, CassandraJoinRDD, CassandraLeftJoinRDD, CassandraLeftOuterJoinRDD, SpannedRDD, ValidRDDType}
 import com.datastax.spark.connector.writer.{ReplicaLocator, _}
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkContext._
@@ -195,6 +195,30 @@ class RDDFunctions[T](rdd: RDD[T]) extends WritableToCassandra[T] with Serializa
     )
   }
 
+  def leftOuterJoinWithCassandraTable[R](
+    keyspaceName: String, tableName: String,
+    selectedColumns: ColumnSelector = AllColumns,
+    joinColumns: ColumnSelector = PartitionKeyColumns,
+    extraBoundColumns: ColumnSelector = SomeColumns())(
+  implicit
+    connector: CassandraConnector = CassandraConnector(sparkContext.getConf),
+    readConf: ReadConf = ReadConf.fromSparkConf(rdd.sparkContext.getConf),
+    newType: ClassTag[R], rrf: RowReaderFactory[R],
+    ev: ValidRDDType[R],
+    currentType: ClassTag[T],
+    rwf: RowWriterFactory[T]): CassandraLeftOuterJoinRDD[T, R] = {
+
+    new CassandraLeftOuterJoinRDD[T, R](
+      rdd,
+      keyspaceName,
+      tableName,
+      connector,
+      columnNames = selectedColumns,
+      joinColumns = joinColumns,
+      extraBoundColumns = extraBoundColumns,
+      readConf = readConf
+    )
+  }
 
   /**
    * Repartitions the data (via a shuffle) based upon the replication of the given `keyspaceName` and `tableName`.
